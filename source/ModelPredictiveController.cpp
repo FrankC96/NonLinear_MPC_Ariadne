@@ -1,4 +1,3 @@
-
 #include <ariadne.hpp>
 #include <ariadne/numeric/floatdp.hpp>
 #include <ariadne/algebra/matrix.hpp>

@@ -6,7 +6,6 @@
 * https://github.com/AleksandarHaber/Model-Predictive-Control-for-Linear-Systems-in-Cpp-by-Using-Eigen-Library/
 */
 #include <ariadne.hpp>
-#include <ariadne_main.hpp>
 #include <ariadne/numeric/floatdp.hpp>
 #include <ariadne/algebra/matrix.hpp>
 #include <ariadne/algebra/vector.hpp>
@@ -15,7 +14,7 @@
 
 using namespace Ariadne;
 
-void ariadne_main() {
+int main() {
 
     // ** MPC params
     unsigned int Np = 20;  // Prediction horizon
@@ -82,5 +81,6 @@ void ariadne_main() {
 
     // mpc.saveData();  // Save state trajectories to a csv file
     // end of main MPC loop
-    // return 0;
+
+    return 0;
 }

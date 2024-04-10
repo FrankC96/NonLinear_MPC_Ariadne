@@ -1,10 +1,5 @@
 #ifndef MODELPREDICTIVECONTROLLER_H
 #define MODELPREDICTIVECONTROLLER_H
-// #include <ariadne.hpp>
-// #include <ariadne/numeric/floatdp.hpp>
-// #include <ariadne/algebra/matrix.hpp>
-// #include <ariadne/algebra/vector.hpp>
-#include <ariadne/solvers/runge_kutta_integrator.hpp>
 
 using namespace Ariadne;
 
