@@ -1,3 +1,9 @@
+
+#include <ariadne.hpp>
+#include <ariadne/numeric/floatdp.hpp>
+#include <ariadne/algebra/matrix.hpp>
+#include <ariadne/algebra/vector.hpp>
+
 #include "ModelPredictiveController.h"
 
 using namespace Ariadne;
@@ -20,13 +26,13 @@ ModelPredictiveController::ModelPredictiveController(
 
         unsigned int maxSimulationSamples = ref.size() - np;
 
-        states.resize(n, maxSimulationSamples);
-        // ATT: no need to set to 0, it already is? this is the constructor, so it better be.
+        // states.resize(n, maxSimulationSamples);
+        // // ATT: no need to set to 0, it already is? this is the constructor, so it better be.
 
-        inputs.resize(m, maxSimulationSamples-1);  // ATT: discarding 1 element, to add the first controlledInput?
-        // same
+        // inputs.resize(m, maxSimulationSamples-1);  // ATT: discarding 1 element, to add the first controlledInput?
+        // // same
 
-        outputs.resize(r, maxSimulationSamples-1);  // ATT: discarding 1 element, to add the last computedOutput?
+        // outputs.resize(r, maxSimulationSamples-1);  // ATT: discarding 1 element, to add the last computedOutput?
     }
 
 Float<DP> ModelPredictiveController::solveMPC() {

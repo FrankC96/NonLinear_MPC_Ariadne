@@ -1,10 +1,9 @@
 #ifndef MODELPREDICTIVECONTROLLER_H
 #define MODELPREDICTIVECONTROLLER_H
-
-#include <ariadne.hpp>
-#include <ariadne/numeric/floatdp.hpp>
-#include <ariadne/algebra/matrix.hpp>
-#include <ariadne/algebra/vector.hpp>
+// #include <ariadne.hpp>
+// #include <ariadne/numeric/floatdp.hpp>
+// #include <ariadne/algebra/matrix.hpp>
+// #include <ariadne/algebra/vector.hpp>
 #include <ariadne/solvers/runge_kutta_integrator.hpp>
 
 using namespace Ariadne;
@@ -39,7 +38,7 @@ class ModelPredictiveController {
 
         // TODO: dynamics object to be passed to RK4
         DottedRealAssignments dynamics;
-        Matrix<FloatDP> Q = Matrix<FloatDP>::identity(6, double_precision);
+        // Matrix<FloatDP> Q = Matrix<FloatDP>::identity(6, double_precision);
         FloatDPVector R;
         FloatDPVector x0;   // initial state vector
         FloatDPVector ref;  // reference vector
@@ -47,9 +46,9 @@ class ModelPredictiveController {
         unsigned int np, nc;  // prediction_horizon, control horizon
 
         // ALREADY DEFINED MATRICES ACCUMULATING RESULTS FOR 100 TIMESTEPS
-        Matrix<FloatDP> states = Matrix<FloatDP>::zero(n, 100, double_precision);
-        Matrix<FloatDP> inputs = Matrix<FloatDP>::zero(m, 100, double_precision);
-        Matrix<FloatDP> outputs = Matrix<FloatDP>::zero(r, 100, double_precision);
+        // Matrix<FloatDP> states = Matrix<FloatDP>::zero(n, 100, double_precision);
+        // Matrix<FloatDP> inputs = Matrix<FloatDP>::zero(m, 100, double_precision);
+        // Matrix<FloatDP> outputs = Matrix<FloatDP>::zero(r, 100, double_precision);
 
         static FloatDP newControl;  // optimal computed control
 };

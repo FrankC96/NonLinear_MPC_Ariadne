@@ -5,10 +5,13 @@
 * Follows the pattern :
 * https://github.com/AleksandarHaber/Model-Predictive-Control-for-Linear-Systems-in-Cpp-by-Using-Eigen-Library/
 */
-
+#include <ariadne.hpp>
 #include <ariadne_main.hpp>
+#include <ariadne/numeric/floatdp.hpp>
+#include <ariadne/algebra/matrix.hpp>
+#include <ariadne/algebra/vector.hpp>
 
-#include <ModelPredictiveController.h>
+#include "ModelPredictiveController.h"
 
 using namespace Ariadne;
 
@@ -44,16 +47,16 @@ void ariadne_main() {
     DottedRealAssignments equationsOfMotion = {
         dot(u)=
             div((div(1, L) * X2 * pow(u, 2)), X1) + div(div(1, g*pow(L, 2))*X3*pow(u, 4), X1) + 
-			div(L*X4*pow(r, 2), X1) + div(X5*v*r, X1) + div(div(1, g*pow(L, 2))*X6*u*pos(v)*pow(v, 2), X1)
+			div(L*X4*pow(r, 2), X1) + div(X5*v*r, X1) + div(div(1, g*pow(L, 2))*X6*u*abs(v)*pow(v, 2), X1)
             + div(X7*(div(1, L)*Y11*pow(u, 2)*delta + Y12*div(T, m))*delta, X1) + div(div(T, m)*X8, X1),
         dot(v) = 
             div(div(1, L)*Y3*u*v, Y1) + div(Y4*u*r, Y1) + div(div(1, sqrt(g*L)*L)*Y5*pow(u, 2)*v, Y1)
-            + div(div(1, sqrt(g*L))*Y6*pow(u, 2)*r, Y1) + div(div(1, L)*Y7*v*pos(v) , Y1) + div(L*Y8*r*pos(r), Y1)
-            + div(Y9*pos(v)*r, Y1) + div(Y10*v*pos(r), Y1) + div(div(1, L)*Y11*pow(u, 2)*delta, Y1) +
+            + div(div(1, sqrt(g*L))*Y6*pow(u, 2)*r, Y1) + div(div(1, L)*Y7*v*abs(v) , Y1) + div(L*Y8*r*abs(r), Y1)
+            + div(Y9*abs(v)*r, Y1) + div(Y10*v*abs(r), Y1) + div(div(1, L)*Y11*pow(u, 2)*delta, Y1) +
             div(Y12*div(T, m)*delta, Y1) + div(Y13*div(T, m), Y1),
         dot(r) = div(div(1, L)*R3*u*v, L*R2) + div(R4*u*r, L*R2) + div(div(1, sqrt(g*L)*L)*R5*pow(u, 2)*v , L*R2)
-            + div(div(1, sqrt(g*L))*R6*pow(u, 2)*r, L*R2) + div(div(1, L)*R7*v*pos(v), L*R2) + div(L*R8*r*pos(r), L*R2)
-            + div(R9*pos(v)*r, L*R2) + div(R10*v*pos(r), L*R2) + div(div(1, L)*R11*pow(u, 2)*delta, L*R2) +
+            + div(div(1, sqrt(g*L))*R6*pow(u, 2)*r, L*R2) + div(div(1, L)*R7*v*abs(v), L*R2) + div(L*R8*r*abs(r), L*R2)
+            + div(R9*abs(v)*r, L*R2) + div(R10*v*abs(r), L*R2) + div(div(1, L)*R11*pow(u, 2)*delta, L*R2) +
             div(R12*div(T, m)*delta, L*R2) + div(R13*div(T, m), L*R2),
         dot(psi) = r,
         dot(x) = u*cos(psi) - v*sin(psi),
