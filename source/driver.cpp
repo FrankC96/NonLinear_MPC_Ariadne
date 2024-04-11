@@ -5,14 +5,121 @@
 * Follows the pattern :
 * https://github.com/AleksandarHaber/Model-Predictive-Control-for-Linear-Systems-in-Cpp-by-Using-Eigen-Library/
 */
+#include <iostream>
 #include <ariadne.hpp>
-#include <ariadne/numeric/floatdp.hpp>
 #include <ariadne/algebra/matrix.hpp>
 #include <ariadne/algebra/vector.hpp>
-
-#include "ModelPredictiveController.h"
+#include <ariadne/solvers/runge_kutta_integrator.hpp>
 
 using namespace Ariadne;
+using state = DifferentialInclusion::EnclosureType::BoundingBoxType::EuclideanSetType;
+
+class ModelPredictiveController {
+    public:
+        ModelPredictiveController(
+            DottedRealAssignments dynamics,
+            unsigned int predictionHorizon,
+            unsigned int controlHorizon,
+            Matrix<FloatDP> Q,
+            Vector<FloatDP> R,
+            Vector<FloatDP> initialStateVector,
+            Vector<FloatDP> initialInputVector,
+            Vector<FloatDP> ref) : dynamics(dynamics),
+                predictionHorizon(predictionHorizon), 
+                controlHorizon(controlHorizon), 
+                Q(Q),
+                R(R),
+                x0(x0),
+                u0(u0),
+                ref(ref){}
+
+        Vector<FloatDP> solveMPC() {
+            Vector<FloatDP> u({0.0_x}, double_precision);
+            
+            return u;
+            }
+
+        // FloatDPApproximationVector propagateDynamics_RK4(Vector<FloatDP> x, Vector<FloatDP> u) {
+        //     THIS WON'T RUN BECAUSE RK4 WON'T ACCEPT A DottedRealAssignments object
+
+        //     RealVariable delta("delta");
+        //     RealVariablesBox inputs={u.get(0)<=delta<=u.get(0)}; // ATT: only for 1 input systems
+
+        //     DifferentialInclusion ivf(this->dynamics, inputs);
+
+        //     RungeKutta4Integrator integrator(1e-8);
+
+        //     Point<FloatDP> state_pt = x;  // initial state to continue from 
+
+
+        //     FloatDPApproximationVector nextState = integrator.step(this->dynamics, state_pt, FloatDP(1e-8_x, double_precision));
+
+        //     return nextState;
+        // }
+        state propagateDynamics_Picard(Vector<FloatDP> x, Vector<FloatDP> u) {
+            
+            RealVariable delta("delta");
+            RealVariablesBox inputs={u.get(0)<=delta<=u.get(0)}; // ATT: only for 1 input systems
+
+            ThresholdSweeperDP sweeper(DoublePrecision(), 1e-8);
+            TaylorPicardIntegrator integrator(
+                step_maximum_error = 1e-3,
+                sweeper,
+                lipschitz_tolerance = 0.5_x,
+                minimum_temporal_order = 4,
+                maximum_temporal_order = 12);
+                
+                RealVariable uu("uu"), vv("vv"), rr("rr"), ppsi("ppsi"), xx("xx"), yy("yy");
+                RealVariablesBox initial = {
+                    {5<=uu<=10},
+                    {-5<=vv<=10},
+                    {-5<=rr<=2},
+                    {-1<=ppsi<=1},
+                    {500<=xx<=1000},
+                    {500<=yy<=1000}
+                    };
+
+
+            DifferentialInclusion ivf(this->dynamics, inputs);
+            SizeType period_of_parameter_reduction = 12;
+            ExactDouble ratio_of_parameters_to_keep = 6.0_x;
+            LohnerReconditioner reconditioner(initial.variables().size(),inputs.variables().size(),period_of_parameter_reduction,ratio_of_parameters_to_keep);
+
+            double step = 1.0/32;
+            auto evolver = DifferentialInclusionEvolver(ivf, integrator, reconditioner);
+            evolver.configuration().set_maximum_step_size(step);
+
+            Real evolution_time = 5;
+            auto orbit = evolver.orbit(initial,evolution_time);
+
+            auto n = ivf.dimension();
+            state graphics_box(n);
+            for(auto set:orbit.reach()) {
+                graphics_box = hull(graphics_box,set.euclidean_set().bounding_box());
+            }
+
+            return graphics_box;
+        };
+
+        auto displayValues(auto x) {return x;}
+    
+    private:
+
+        DottedRealAssignments dynamics = {};
+        unsigned int predictionHorizon = 10;
+        unsigned int controlHorizon = 5;
+
+        Matrix<FloatDP> Q = Matrix<FloatDP>::identity(6, double_precision);
+        Vector<FloatDP> R = Vector<FloatDP>::zero(6, double_precision);
+        Vector<FloatDP> x0 = Vector<FloatDP>::zero(6, double_precision);
+        Vector<FloatDP> u0 = Vector<FloatDP>::zero(1, double_precision); 
+        Vector<FloatDP> ref = Vector<FloatDP>::zero(6, double_precision);
+        
+        // [IGNORE THIS] DEFINE HISTORY MATRICES ACCUMULATING RESULTS FOR 100 TIMESTEPS
+        Matrix<FloatDP> states = Matrix<FloatDP>::zero(6, 100, double_precision);
+        Matrix<FloatDP> inputs = Matrix<FloatDP>::zero(1, 100, double_precision);
+        Matrix<FloatDP> outputs = Matrix<FloatDP>::zero(6, 100, double_precision); // assuming perfect state knowledge
+};
 
 int main() {
 
@@ -41,7 +148,6 @@ int main() {
 
     // ** System vars
     RealVariable u("u"), v("v"), r("r"), psi("psi"), x("x"), y("y"), delta("delta");
-    Vector<FloatDP> V({1, 2}, double_precision); // define a symbolic state vector
 
     DottedRealAssignments equationsOfMotion = {
         dot(u)=
@@ -63,23 +169,34 @@ int main() {
     };
     // end of system vars
 
+    Matrix<FloatDP> Q = Matrix<FloatDP>::identity(6, double_precision);
+    Vector<FloatDP> R = Vector<FloatDP>::one(6, double_precision);
+
     // **Define the desired trajectory
     unsigned int timeSteps = 300;
+    // just a stabilization trajectory, drive everything to 0
     Vector<FloatDP> desiredTraj = Vector<FloatDP>::zero(timeSteps, double_precision);
     // end of desird trajectory
 
     // ** Main MPC loop
-    Float<DP> temporaryInput = FloatDP(0.0_x, double_precision);  // initial input
-    Vector<FloatDP> temporaryState = Vector<FloatDP>::zero(6, double_precision);  // initial state
-    ModelPredictiveController mpc(equationsOfMotion, Np, Nc, temporaryState, temporaryInput, desiredTraj);
+
+    // these will will form the MPC object to make the calculations for timestep k = 0,
+    // they need to be initialized with the MPC object.
+    Vector<FloatDP> initialInput = Vector<FloatDP>::zero(1, double_precision);  // initial input
+    Vector<FloatDP> initialState = Vector<FloatDP>::zero(6, double_precision);  // initial state
     
-    for(int i=0;i<20;i++) {
-        mpc.solveMPC();  // this should return the next optimal input to be fed again to the system.
-        mpc.propagateDynamics(temporaryState, temporaryInput);  // this should accept previous state, and the next computed input.
+    Vector<FloatDP> tempInput = Vector<FloatDP>::zero(1, double_precision);  // temp input
+    Vector<FloatDP> tempState = Vector<FloatDP>::zero(6, double_precision);  // temp state
+    tempState = initialState;
 
+    ModelPredictiveController mpc(equationsOfMotion, Np, Nc, Q, R, initialState, initialInput, desiredTraj);
+    for(int i=0;i<1;i++) {
+        Vector<FloatDP> tempInput = mpc.solveMPC();  // this should return the next optimal input to be fed again to the system.
+        // FloatDPApproximationVector newState = mpc.propagateDynamics_RK4(tempState, tempInput);  // this should accept the previous state, and the next computed input.
+        state  newState = mpc.propagateDynamics_Picard(tempState, tempInput);  // this should accept the previous state, and the next computed input.
+        // std::cout << B << std::endl;
+    
     }
-
-    // mpc.saveData();  // Save state trajectories to a csv file
     // end of main MPC loop
 
     return 0;
