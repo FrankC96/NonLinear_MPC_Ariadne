@@ -4,6 +4,8 @@
 * date: April 2024 
 * Follows the pattern :
 * https://github.com/AleksandarHaber/Model-Predictive-Control-for-Linear-Systems-in-Cpp-by-Using-Eigen-Library/
+
+* g++-10 *.cpp -I/usr/local/include/ariadne -L/usr/local/lib -std=c++20 -lariadne -w -fcompare-debug-second
 */
 #include <iostream>
 #include <ariadne.hpp>
@@ -192,9 +194,9 @@ int main() {
     ModelPredictiveController mpc(equationsOfMotion, Np, Nc, Q, R, initialState, initialInput, desiredTraj);
     for(int i=0;i<1;i++) {
         Vector<FloatDP> tempInput = mpc.solveMPC();  // this should return the next optimal input to be fed again to the system.
+
         // FloatDPApproximationVector newState = mpc.propagateDynamics_RK4(tempState, tempInput);  // this should accept the previous state, and the next computed input.
         state  newState = mpc.propagateDynamics_Picard(tempState, tempInput);  // this should accept the previous state, and the next computed input.
-        // std::cout << B << std::endl;
     
     }
     // end of main MPC loop
