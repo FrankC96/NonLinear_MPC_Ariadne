@@ -52,14 +52,14 @@ class ModelPredictiveController {
         //     Point<FloatDP> state_pt = x;  // initial state to continue from 
 
 
-        //     FloatDPApproximationVector nextState = integrator.step(this->dynamics, state_pt, FloatDP(1e-8_x, double_precision));
+            // FloatDPApproximationVector nextState = integrator.step(this->dynamics, state_pt, FloatDP(1e-8_x, double_precision));
 
         //     return nextState;
         // }
-        state propagateDynamics_Picard(Vector<FloatDP> x, Vector<FloatDP> u) {
+        state propagateDynamics_Picard(Vector<FloatDP> X, Vector<FloatDP> input) {
             
             RealVariable delta("delta");
-            RealVariablesBox inputs={u.get(0)<=delta<=u.get(0)}; // ATT: only for 1 input systems
+            RealVariablesBox inputs={input.get(0)<=delta<=input.get(0)}; // ATT: only for 1 input systems
 
             ThresholdSweeperDP sweeper(DoublePrecision(), 1e-8);
             TaylorPicardIntegrator integrator(
@@ -69,14 +69,14 @@ class ModelPredictiveController {
                 minimum_temporal_order = 4,
                 maximum_temporal_order = 12);
                 
-                RealVariable uu("uu"), vv("vv"), rr("rr"), ppsi("ppsi"), xx("xx"), yy("yy");
+                RealVariable u("u"), v("v"), r("r"), psi("psi"), x("x"), y("y");
                 RealVariablesBox initial = {
-                    {5<=uu<=10},
-                    {-5<=vv<=10},
-                    {-5<=rr<=2},
-                    {-1<=ppsi<=1},
-                    {500<=xx<=1000},
-                    {500<=yy<=1000}
+                    {5<=u<=10},
+                    {-5<=v<=10},
+                    {-5<=r<=2},
+                    {-1<=psi<=1},
+                    {500<=x<=1000},
+                    {500<=y<=1000}
                     };
 
 
