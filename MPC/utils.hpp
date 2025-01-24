@@ -9,7 +9,7 @@ void pprint(std::string str, auto var)
 #define PRINT(expr) { pprint(#expr,(expr)); }
 
 
-ValidatedVectorMultivariateFunctionPatch integrate_dynamics(EffectiveVectorMultivariateFunction f, ExactBoxType x_dom, StepSizeType h)
+ValidatedVectorMultivariateFunctionPatch integrateDynamics(EffectiveVectorMultivariateFunction f, ExactBoxType x_dom, StepSizeType h)
 {
     auto integrator = TaylorPicardIntegrator(1E-2);
 
@@ -47,6 +47,9 @@ VectorVariableBoxDomainType operator| (RealVectorVariable vv, BoxDomainType d) {
 }
 
 typedef Variant<VariableIntervalDomainType, VectorVariableBoxDomainType> VariableIntervalOrBoxDomainType;
+typedef Variant<RealVariable, RealVectorVariable> ScalarOrVectorVariable;
+typedef Variant<BoxDomainType, IntervalDomainType> BoxOrIntervalDomain;
+template<class I> Box<I> make_box(InitializerList<Interval<RawFloatDP>> lst) {return Box<I>(Vector<I>(lst));}
 
 ValidatedScalarMultivariateFunctionPatch make_function_patch(List<VariableIntervalOrBoxDomainType> sv_arg_doms, RealExpression e) {
     List<VariableIntervalDomainType> arg_doms;
@@ -101,58 +104,3 @@ ValidatedScalarMultivariateFunctionPatch make_function_patch(List<VariableInterv
 ValidatedVectorMultivariateFunctionPatch make_function_patch(List<VariableIntervalOrBoxDomainType> sv_arg_doms, ValidatedVectorMultivariateFunctionPatch f, List<RealExpression> es) {
     return compose(cast_unrestricted(f), make_function_patch(sv_arg_doms, es));
 }
-
-// INTEGRATE DYNAMICS
-// LOSE THE C TERM
-// EXTRACT X EQS
-// EXTRACT GAMMA EQ 
-// RESTRICT [X EQS] [QUESTION] isn't phi0 = psi0? 
-
-// RETURN XDOM, TDOM, PSI, GAMMA
-
-Tuple<
-        BoxDomainType,
-        IntervalDomainType, 
-        ValidatedVectorMultivariateFunctionPatch,
-        ValidatedScalarMultivariateFunctionPatch
-        > makeStep
-(
-    int                                 iter,
-    EffectiveVectorMultivariateFunction f_xuc,
-    RealVectorVariable                  x,
-    List<RealVariable>                  vars,  // FIXME: unify with RealOrVectorVariable
-    Tuple<BoxDomainType, IntervalDomainType, IntervalDomainType, IntervalDomainType> restr_doms,
-    StepSizeType                        h
-)
-{   
-    RealVariable("u" + to_string(iter));
-
-    BoxDomainType       x_dom_next;
-    IntervalDomainType  t_dom_next;
-
-    RealVariable u = vars[0];
-    RealVariable c = vars[1];
-    RealVariable t = vars[2];
-
-    BoxDomainType x_dom = std::get<0>(restr_doms);
-    IntervalDomainType u_dom = std::get<1>(restr_doms);
-    IntervalDomainType c_dom = std::get<2>(restr_doms);
-    IntervalDomainType t_dom = std::get<3>(restr_doms);
-
-    VectorVariableBoxDomainType xr = x | x_dom;
-    VariableIntervalDomainType ur = u | u_dom, tr = t | t_dom;
-
-    BoxDomainType xuc_dom = product(x_dom, u_dom, c_dom);
-
-    ValidatedVectorMultivariateFunctionPatch phigamma_ = integrate_dynamics(f_xuc, xuc_dom, h);
-    ValidatedVectorMultivariateFunctionPatch phigamma = make_function_patch({ xr,ur,tr }, phigamma_, { x[0],x[1],u,0,t });
-    ValidatedVectorMultivariateFunctionPatch phi = project_function(phigamma, Range(0, x.size()));
-    ValidatedScalarMultivariateFunctionPatch gamma = phigamma[x.size()+1]; // [PROBLEM +1?] 
-    ValidatedVectorMultivariateFunctionPatch psi = make_function_patch({ xr,ur }, phi, { x[0],x[1],u,h });
-
-    x_dom_next = cast_exact_box(psi.range());
-    t_dom_next = {0, h};
-
-    
-    return make_tuple(x_dom_next, t_dom_next, phi, gamma);
-};

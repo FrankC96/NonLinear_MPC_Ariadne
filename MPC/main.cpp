@@ -86,18 +86,8 @@ int main()
         // FIXME: generalize 
         for(int i=0;i<num_shooting_nodes;++i) { xu_doms_restr.append(input_variables[i] | u_doms[i]); }
         
-        // if(iter!=num_shooting_nodes) { xu_doms_restr.clear(); }
+        if(iter!=num_shooting_nodes) { xu_doms_restr.clear(); }
         
-        ValidatedVectorMultivariateFunctionPatch step0 = make_function_patch(xu_doms_restr, phi_patches[iter-1], { state_variables[iter-1][0],state_variables[iter-1][1],input_variables[iter-1],h });
-        ValidatedVectorMultivariateFunctionPatch step1 = make_function_patch(xu_doms_restr, phi_patches[iter], { state_variables[iter][0],state_variables[iter][1],input_variables[iter],h });
-        ValidatedVectorMultivariateFunctionPatch state1 = make_function_patch(xu_doms_restr, { state_variables[iter][0],state_variables[iter][1] });
-
-        ValidatedScalarMultivariateFunctionPatch objective0 = make_function_patch(xu_doms_restr, gamma_patches[iter-1], { state_variables[iter-1][0],state_variables[iter-1][1],input_variables[iter-1],h });
-        ValidatedScalarMultivariateFunctionPatch objective1 = make_function_patch(xu_doms_restr, gamma_patches[iter], { state_variables[iter][0],state_variables[iter][1],input_variables[iter],h });
-        ValidatedScalarMultivariateFunctionPatch objective = objective0 + objective1;
-
-        ValidatedVectorMultivariateFunctionPatch constraint1 = step0 - state1;
-        PRINT(constraint1);
     };
 
     // for(int iter=1;iter<2;++iter)

@@ -1,62 +1,110 @@
-import time
 import numpy as np
-from scipy.integrate import solve_ivp
-import matplotlib.pyplot as plt
+
+from controller import Controller
+from simulator import Simulator
+from functools import partial
 
 
-def f(t, x):
-    return [x[1], 6*x[0]**2-t]
+def robot_model(x: np.array, u: np.array) -> np.array:
+    """
+    A mathematical model representing the plant, by a set of 1st order nonlinear equations.
 
-class BVP:
-    def __init__(self, f, steps, a0, a1, y0=1, t=[0, 1]):
-        self.steps = steps
-        self.f = f
-        self.t_span = t
-        self.a = [a0, a1]
-        self.y0 = y0
-        self.hist_a = [self.a]
-    
-    def next_a(self, y, ref):
-        y = [y[i]-ref for i in range(len(y))]
-        
-        tmp = self.a[1] - ((self.a[1] - self.a[0]) / (y[1] - y[0])) * y[1]
-        self.a = [self.a[1], tmp]
+    The nonlinear system is normalized by
+        -> [L] distance between each wheel
+        -> [V] maximum linear velocity of the robot
+    """
+    L, V = 0.5, 5.0
 
-        return self.a
-    
-    def ivp_solve(self, dom, tmp_a):
-        return solve_ivp(self.f, t_span=dom, y0=[self.y0, tmp_a], method="RK45")["y"][0][-1]
+    T = L / V
 
-    def conv_check(self, y, ref):
-        return np.abs(y - ref)
+    u0_norm = u[0] / V
+    u1_norm = u[1] * T
 
-    def solve(self, dom, ref=5):
-        for i in range(self.steps):
-            ivp_a = self.ivp_solve(dom, self.a[0])
-            ivp_b = self.ivp_solve(dom, self.a[1])
+    dxdt = np.cos(x[2]) * u0_norm
+    dydt = np.sin(x[2]) * u0_norm
+    dthetadt = u1_norm
 
-            a_next = self.next_a(y=[ivp_a, ivp_b], ref=ref)
-            self.hist_a.append(a_next)
+    dxdt_norm = dxdt / L
+    dydt_norm = dydt / L
 
-            ivp_F = self.ivp_solve(dom, self.a[1])
-            print(f'Step {i+1} with error {self.conv_check(ivp_F, ref=ref)}')
-            if self.conv_check(ivp_F, ref=ref) < 1e-1:
-                self.a = [float(self.a[i]) for i in range(len(self.a))]
-                print(f"Converged at a->{self.a} under {i+1} steps in {d}")
-                print(f"y final is {ivp_F}")
-                print(100*'-')
-                return ivp_F
+    return np.array([dxdt_norm, dydt_norm, dthetadt])
 
-                
+
+def robot_plant(x: np.array, u: np.array, mag: float) -> np.array:
+    """
+    Adding random uniform noise to the dynamics to approximate the mismatch
+    between the dynamics and the actual plant.
+    """
+    return robot_model(x, u) + np.random.uniform(-mag, mag, (3,))
+
 
 if __name__ == "__main__":
-    # main loop
-    dom = np.linspace(0, 2, 10)  # domain of interest in func to be evaluated
-    num_nodes = 5
-    doms = np.split(dom, num_nodes)
+    x_init = np.array([5.5, 5.5, 0.0])
+    x_ref = np.array([0.0, 0.0, 0.0])
 
-    prob = BVP(f, steps=20, a0=1.2, a1=1.5)
-    for d in doms:
-        y = prob.solve(dom=d, ref=5)
-        prob.a[1] = y
-        
+    T_MAX = 5
+    N_STATES = len(x_init)
+    N_INPUTS = 2
+
+    PLANT_NOISE = 0.2
+    # FIXME: put something reasonable
+    STATE_BOUNDS = np.array([-1, 1])
+    INPUT_BOUNDS = np.array([-1, 1])
+
+    Q = np.eye(N_STATES)
+    R = np.eye(N_INPUTS)
+
+    # using the dynamics function to perform a prediction step
+    mpc_coll = Controller(
+        constr_method="COLL",
+        model=robot_model,
+        n_states=N_STATES,
+        n_inputs=N_INPUTS,
+        n_pred=20,
+        t_max=T_MAX,
+        Q=Q,
+        R=R,
+        state_bounds=STATE_BOUNDS,
+        input_bounds=INPUT_BOUNDS,
+        minimize_method="SLSQP",
+        term_constr=False,
+    )
+    mpc_dms = Controller(
+        constr_method="DMS",
+        model=robot_model,
+        n_states=N_STATES,
+        n_inputs=N_INPUTS,
+        n_pred=20,
+        t_max=T_MAX,
+        Q=Q,
+        R=R,
+        state_bounds=STATE_BOUNDS,
+        input_bounds=INPUT_BOUNDS,
+        minimize_method="SLSQP",
+        term_constr=False,
+    )
+
+    # using the plant function to perform a simulation step
+    sim_coll = Simulator(
+        controller=mpc_coll,
+        x_0=x_init,
+        x_r=x_ref,
+        sim_steps=20,
+        plant=partial(robot_plant, mag=PLANT_NOISE),
+        input_bounds=None,
+    )
+
+    sim_dms = Simulator(
+        controller=mpc_dms,
+        x_0=x_init,
+        x_r=x_ref,
+        sim_steps=20,
+        plant=partial(robot_plant, mag=PLANT_NOISE),
+        input_bounds=None,
+    )
+
+    x_coll, u_coll, t_coll = sim_coll.get_orbit()
+    print(f"[{mpc_coll.constr_method}] Final x, u {x_coll[-1, :]} | {u_coll[-1, :]}")
+
+    x_dms, u_dms, t_dms = sim_dms.get_orbit()
+    print(f"[{mpc_coll.constr_method}] Final x, u {x_dms[-1, :]} | {u_dms[-1, :]}")
