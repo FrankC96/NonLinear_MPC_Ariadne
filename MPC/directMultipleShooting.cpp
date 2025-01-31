@@ -1,229 +1,185 @@
 #include <iostream>
 #include "ariadne.hpp"
 #include "utils.hpp"
+#include "ariadne/solvers/runge_kutta_integrator.hpp"
 
-class problemFormulation
-{
-public:
-    int num_states;
-    int num_inputs;
+using namespace Ariadne;
+using VectorAndScalarPatch = Pair<ValidatedVectorMultivariateFunctionPatch, ValidatedScalarMultivariateFunctionPatch>;
 
-    int num_shooting_nodes;
-    StepSizeType time_horizon;
+const int num_shooting_nodes = 2;
 
-    EffectiveVectorMultivariateFunction dynamics_eqs;
+RealVectorVariable x("x", 2);
+RealVariable u("u");
+RealVariable t("t");
+RealVariable c("c");
+StepSizeType h = 0.0625_x;
 
-    BoxDomainType x0dom;
-    IntervalDomainType u0dom;
-    IntervalDomainType c0dom;
-    IntervalDomainType t0dom;
+BoxDomainType xdom = { { -2.0_x, +1.0_x }, { -2.0_x, +1.0_x } };
+IntervalDomainType udom = { -0.125_x, +0.125_x };
+IntervalDomainType cdom = { -0.0_x, +0.0_x };
+IntervalDomainType tdom = { 0, h};
+BoxDomainType x_sim_dom = xdom;
+IntervalDomainType c_sim_dom = cdom;
 
-    List<BoxDomainType> xdoms;
+BoxDomainType init_doms = product(xdom, udom, cdom);
 
+Vector<RealExpression> x_dot = { u - 2*x[0] - 1*x[1], x[0]};
+RealExpression u_dot = 0;
+RealExpression c_dot = pow(x[0],2) + pow(x[1], 2) + pow(u, 2);
 
-    problemFormulation(int num_states, int num_inputs, int num_shooting_nodes, StepSizeType time_horizon) : 
-                                    num_states(num_states), num_inputs(num_inputs), num_shooting_nodes(num_shooting_nodes), time_horizon(time_horizon) {};
+EffectiveVectorMultivariateFunction f_xuc = Function({ x[0], x[1], u, c }, { x_dot[0], x_dot[1], u_dot, c_dot });
 
-    void setDynamics(EffectiveVectorMultivariateFunction f_xuc, ExactBoxType initial_domains)
-    {   
-        // RHS
-        dynamics_eqs = f_xuc;
+List<RealVectorVariable> X = {};
+List<RealVariable> U;
 
-        x0dom = project(initial_domains, Range(0, num_states));
-        u0dom = initial_domains[2];
-        c0dom = initial_domains[3];
-        t0dom = initial_domains[4];
+List<BoxDomainType> x_doms = {};
+List<IntervalDomainType> u_doms = {};
+List<IntervalDomainType> c_doms = {};
 
-        xdoms.append(x0dom);
-    };
-};
+List<VariableIntervalOrBoxDomainType> xu_restr_domains;
 
-class problemOptimization
-{
-private:
-    // make problemOptimization inherit from problemFormulation
-    problemFormulation prob;
+List<ValidatedVectorMultivariateFunctionPatch> phi_patches;
+List<ValidatedScalarMultivariateFunctionPatch> gamma_patches;
 
-public:
-    List<RealVectorVariable> X;
-    List<RealVariable> U;
-    List<ExactBoxType> X_DOMS;
-    List<ExactBoxType> U_DOMS;
-    List<BoxOrIntervalDomain> XU_DOMAIN;
-    Tuple<ValidatedVectorMultivariateFunctionPatch, ValidatedScalarMultivariateFunctionPatch> state_result;
-    List<ValidatedVectorMultivariateFunctionPatch> phi_patches;
-    List<ValidatedScalarMultivariateFunctionPatch> gamma_patches;
+List<ValidatedScalarMultivariateFunctionPatch> constraints;
 
-    problemOptimization(problemFormulation prob) : prob(prob) {};
+FloatDPApproximationVector optimization_step(BoxDomainType xdom, IntervalDomainType udom, IntervalDomainType cdom)
+{   
+    X = {};
+    U = {};
 
-    Tuple<ValidatedVectorMultivariateFunctionPatch, ValidatedScalarMultivariateFunctionPatch> calculateNextState(EffectiveVectorMultivariateFunction f, int current_shooting_node)
+    x_doms = {};
+    u_doms = {};
+    c_doms = {};
+
+    xu_restr_domains = {};
+
+    phi_patches = {};
+    gamma_patches = {};
+    constraints = {};
+
+    ValidatedVectorMultivariateFunctionPatch step;
+    ValidatedVectorMultivariateFunctionPatch state;
+    ValidatedVectorMultivariateFunctionPatch g;
+    ValidatedScalarMultivariateFunctionPatch objective;
+
+    for(int i=0;i<=num_shooting_nodes;++i)
     {
+        RealVectorVariable x = RealVectorVariable("x" + to_string(i), 2);
+        RealVariable u = RealVariable("u" + to_string(i));
+        RealVariable t = RealVariable("t");
 
-        auto x = RealVectorVariable("x" + to_string(current_shooting_node), prob.num_states);
-        auto u = RealVariable("u" + to_string(current_shooting_node));
-        auto t = RealVariable("t");
+        X.append(x);
+        U.append(u);
+    }
+    x_doms.append(xdom);
+    u_doms.append(udom);
+    c_doms.append(cdom);
+    for(int i=0;i<num_shooting_nodes;++i)
+    {
+        // std::cout << "Creating " << i << "-th shooting node" << "\n"; 
 
-        VectorVariableBoxDomainType xr = x | prob.xdoms[current_shooting_node];
-        VariableIntervalDomainType ur = u | prob.u0dom;
-        VariableIntervalDomainType tr = t | prob.t0dom;
+        VectorVariableBoxDomainType xr = x | x_doms[i];
+        VariableIntervalDomainType ur = u | u_doms[i];
+        VariableIntervalDomainType tr = t | tdom;
 
-        ValidatedVectorMultivariateFunctionPatch phigamma_ = integrateDynamics(prob.dynamics_eqs, product(prob.xdoms[current_shooting_node], prob.u0dom, prob.c0dom), prob.time_horizon);
+        ValidatedVectorMultivariateFunctionPatch phigamma_ = integrateDynamics(f_xuc, product(x_doms[i], udom, c_doms[i]), h);
         ValidatedVectorMultivariateFunctionPatch phigamma = make_function_patch({ xr,ur,tr }, phigamma_, { x[0],x[1],u,0,t });
         ValidatedVectorMultivariateFunctionPatch phi = project_function(phigamma, Range(0, x.size()));
         ValidatedScalarMultivariateFunctionPatch gamma = phigamma[x.size()+1];
-        ValidatedVectorMultivariateFunctionPatch psi = make_function_patch({ xr,ur }, phi, { x[0],x[1],u,prob.time_horizon });
+        ValidatedVectorMultivariateFunctionPatch psi = make_function_patch({ xr,ur }, phi, { x[0],x[1],u,h });
 
-        prob.xdoms.append(cast_exact_box(psi.range()));
-        return make_tuple(phi, gamma);
+        xdom = cast_exact_box(psi.range());
+        cdom = cast_exact_interval(gamma.range());
+
+        x_doms.append(xdom);
+        u_doms.append(udom);
+        c_doms.append(cdom);
+
+        phi_patches.append(phi);
+        gamma_patches.append(gamma);
     }
 
-    List<ExactBoxType> getDomains() {return prob.xdoms;}
+    assert(X.size() == U.size());
+    assert(x_doms.size() == u_doms.size());
+    assert(X.size() == x_doms.size());
+    for(int i=0;i<X.size();++i) { xu_restr_domains.append(X[i] | x_doms[i]); }
+    for(int i=0;i<U.size();++i) { xu_restr_domains.append(U[i] | u_doms[i]); }
 
-    ValidatedVectorMultivariateFunctionPatch createConstraints(
-        List<ValidatedVectorMultivariateFunctionPatch> phi_patches,
-        List<RealVectorVariable> full_x,
-        List<RealVariable> full_u,
-        List<BoxOrIntervalDomain> full_xu_doms)
+    step = make_function_patch(xu_restr_domains, phi_patches[0], { X[0][0],X[0][1],U[0],h });
+    state = make_function_patch(xu_restr_domains, { X[1][0],X[1][1] });
+    ValidatedVectorMultivariateFunctionPatch constraint = step - state;
+    for(int j=0;j<constraint.result_size();++j) { constraints.append(constraint[j] );}
+
+    for(int i=0;i<num_shooting_nodes-1;++i)
     {
-        List<VariableIntervalOrBoxDomainType> restricted_domains;
-        ValidatedVectorMultivariateFunctionPatch step;
-        ValidatedVectorMultivariateFunctionPatch state;
-        ValidatedVectorMultivariateFunctionPatch g;
-        List<ValidatedScalarMultivariateFunctionPatch> constraints;
+        step = make_function_patch(xu_restr_domains, phi_patches[i], { X[i][0],X[i][1],U[i],h });
+        state = make_function_patch(xu_restr_domains, { X[i+1][0],X[i+1][1] });
+        ValidatedVectorMultivariateFunctionPatch constraint = step - state;
 
-        
-        for(int i=1;i<full_x.size();++i) {restricted_domains.append(full_x[i] | prob.xdoms[i]);} 
-        for(int i=1;i<full_u.size();++i) {restricted_domains.append(full_u[i] | prob.u0dom);} 
-
-        std::cout << "\n" << "Constraint vars" << "\n";
-        for(int i=1;i<full_x.size();++i) {std::cout<< full_x[i] << "\t";}
-        std::cout << "\n";
-        for(int i=1;i<full_x.size();++i) {std::cout<< full_u[i] << "\t";}
-        std::cout << "\n";
-        std::cout << "with xi size " << full_x[1].size() << "\n";
-        std::cout << "and ui size " << full_x[1].size() << "\n";
-        for(int i=1;i<prob.num_shooting_nodes;++i)
-        {   
-            step = make_function_patch(restricted_domains, phi_patches[i-1], { full_x[i][0],full_x[i][1],full_u[i],prob.time_horizon });
-            state = make_function_patch(restricted_domains, { full_x[i+1][0],full_x[i+1][1] });
-            ValidatedVectorMultivariateFunctionPatch constraint = step - state;
-
-            // append each state constraint to a list
-            for(int j=0;j<constraint.result_size();++j) { constraints.append(constraint[j] );}
-        }
-        
-        // convert constraint list to ValidatedVectorMultivariateFunctionPatch
-        return ValidatedVectorMultivariateFunctionPatch(constraints);
+        for(int j=0;j<constraint.result_size();++j) { constraints.append(constraint[j] );}
     }
+    // std::cout << "Appended " << constraints.size() << " constraints." << "\n"; 
 
-    ValidatedScalarMultivariateFunctionPatch createObjective(
-        List<ValidatedScalarMultivariateFunctionPatch> gamma_patches,
-        List<RealVectorVariable> full_x,
-        List<RealVariable> full_u,
-        List<BoxOrIntervalDomain> full_xu_doms)
+    g = ValidatedVectorMultivariateFunctionPatch(constraints);
+
+    objective = make_function_patch(xu_restr_domains, gamma_patches[0], { X[0][0],X[0][1],U[0],h });
+    // std::cout << "Initialized cost" << "\n"; 
+    for(int j=1;j<num_shooting_nodes;++j)
     {
-        List<VariableIntervalOrBoxDomainType> restricted_domains;
-        ValidatedScalarMultivariateFunctionPatch objective;
-
-        for(int i=1;i<full_x.size();++i) {restricted_domains.append(full_x[i] | prob.xdoms[i]);} 
-        for(int i=1;i<full_u.size();++i) {restricted_domains.append(full_u[i] | prob.u0dom);} 
-
-        // DEBUG:
-        std::cout << "\n" << "Objective vars" << "\n";
-        for(int i=1;i<full_x.size();++i) {std::cout<< full_x[i] << "\t";}
-        std::cout << "\n";
-        for(int i=1;i<full_x.size();++i) {std::cout<< full_u[i] << "\t";}
-        std::cout << "\n";
-        std::cout << "with xi size " << full_x[1].size() << "\n";
-        std::cout << "and ui size " << full_x[1].size() << "\n \n";
-
-        // initial cost
-        objective = make_function_patch(restricted_domains, gamma_patches[1], { full_x[1][0],full_x[1][1],full_u[1],prob.time_horizon });
-        for(int i=2;i<=prob.num_shooting_nodes;++i)
-        {
-            objective -= make_function_patch(restricted_domains, gamma_patches[i], { full_x[i][0],full_x[i][1],full_u[i],prob.time_horizon });
-        }
-        return objective;
+        objective += make_function_patch(xu_restr_domains, gamma_patches[j], { X[j][0],X[j][1],U[j],h });
+        // std::cout << "Appended " << j << "-th objective." << "\n"; 
     }
-    FloatDPBoundsVector optimize()
-    {
-        ValidatedVectorMultivariateFunctionPatch g;
-        ValidatedScalarMultivariateFunctionPatch f;
 
-        for(int i=0;i<=prob.num_shooting_nodes;++i)
-        {   
-            state_result = calculateNextState(prob.dynamics_eqs, i);
-
-            phi_patches.append(std::get<0>(state_result));
-            gamma_patches.append(std::get<1>(state_result));
-
-            X.append(RealVectorVariable("x" + to_string(i), prob.num_states));
-            U.append(RealVariable("u" + to_string(i)));
-        }
-        PRINT(X);
-        X_DOMS = getDomains();
-
-        // FIXME: 1 loop
-        for(int i=0;i<=prob.num_shooting_nodes;++i) {XU_DOMAIN.append(X_DOMS[i]);}
-        for(int i=0;i<=prob.num_shooting_nodes;++i) {XU_DOMAIN.append(prob.u0dom);}
+    NonlinearInfeasibleInteriorPointOptimiser nlio;
         
-        g = createConstraints(phi_patches, X, U, XU_DOMAIN);
-        f = createObjective(gamma_patches, X, U, XU_DOMAIN);
+    int num_decision_state_vars = (num_shooting_nodes+1) * 2;
+    int num_decision_input_vars = (num_shooting_nodes+1) * 1;
 
-        PRINT(g.argument_size());
-        PRINT(f.argument_size());
-        NonlinearInfeasibleInteriorPointOptimiser nlio;
+    int num_decision_vars = num_decision_state_vars + num_decision_input_vars;
+    int num_constraints = (num_shooting_nodes) * 2;
 
-        int num_decision_vars = prob.num_shooting_nodes * (prob.num_states + prob.num_inputs);
-        int num_constraints = (prob.num_shooting_nodes-1) * (prob.num_states);
+    List<IntervalDomainType> D_temp;
+    List<IntervalDomainType> C_temp;
+    for(int i=0;i<num_constraints;++i) {C_temp.append({-0.125_x, +0.125_x});}
 
-        List<IntervalDomainType> D_temp;
-        List<IntervalDomainType> C_temp;
-        // putting  {-0.5_x, +0.5_x} for all state vars and {-0.125_x, +0.125_x} for input vars
-        for(int i=0;i<prob.num_shooting_nodes*prob.num_states;i++) {D_temp.append({-0.25_x, +0.25_x});}
-        for(int i=prob.num_shooting_nodes*prob.num_states;i<num_decision_vars;i++) {D_temp.append({-0.125_x, +0.125_x});}
-        for(int i=0;i<num_constraints;i++) {C_temp.append({-0.0_x, +0.0_x});}
+    assert(objective.result_size() == 1);
+    assert(objective.domain() == g.domain());
+    auto D = Box<ExactIntervalType>(objective.domain());
+    auto C = Box<ExactIntervalType>(Vector<IntervalDomainType>(C_temp));
 
-        auto D = Box<ExactIntervalType>(Vector<IntervalDomainType>(D_temp));
-        auto C = Box<ExactIntervalType>(Vector<IntervalDomainType>(C_temp));
- 
-        FloatDPBoundsVector u_optimal = nlio.minimise(f, D, g, C);
+    return nlio.minimise(objective, D, g, C);
+}
 
-        PRINT(u_optimal);
-        return u_optimal;
-    }
-};
 int main()
-{
-    RealVectorVariable x("x", 2);
-    RealVariable u("u");
-    RealVariable t("t");
-    RealVariable c("c");
+{   
+    for(int i=0;i<20;++i)
+    {   
+        std::cout << "Simulating step ---------------\t[" << i << "]" << "\n";
+        
+        PRINT(x_sim_dom);
+        RealVectorVariable x = RealVectorVariable("x_sim" + to_string(i), 2);
+        RealVariable u = RealVariable("u_sim" + to_string(i));
 
-    BoxDomainType xdom = { { -1.0_x, +1.0_x }, { -1.0_x, +1.0_x } };
-    IntervalDomainType udom = { -1.125_x, +1.125_x };
-    IntervalDomainType cdom = { -1.0_x, 1.0_x };
-    IntervalDomainType tdom = { 0, 0.0625_x};
-    auto i_doms = product(xdom, udom, cdom, tdom);
+        FloatDPApproximationVector vars_opt = optimization_step(x_sim_dom, udom, c_sim_dom);    
+        udom = IntervalDomainType({-abs(vars_opt[2*(1+num_shooting_nodes)]), +abs(vars_opt[2*(1+num_shooting_nodes)])});  
+        PRINT(vars_opt);
+        PRINT(udom);
+        List<FloatDPApproximation> x_opt; for (int i=0;i<2*(1+num_shooting_nodes);++i) { x_opt.append(vars_opt[i]); }            
+        List<FloatDPApproximation> u_opt; for (int i=2*(1+num_shooting_nodes);i<vars_opt.size();++i) { u_opt.append(vars_opt[i]); }            
 
-    Vector<RealExpression> x_dot = { x[1],u };
-    RealExpression u_dot = 0;
-    RealExpression c_dot = pow(x[0], 2) + pow(x[1], 2) + pow(u, 2);
-    
-    // === RHS ===
-    EffectiveVectorMultivariateFunction f_xuc = Function({ x[0], x[1], u, c }, { x_dot[0], x_dot[1], u_dot, c_dot });
+        VectorVariableBoxDomainType xr = x | x_sim_dom;
+        VariableIntervalDomainType ur = u | udom;
+        VariableIntervalDomainType tr = t | tdom;
 
-    const int NUM_STATE = x.size();
-    const int NUM_INPUT = 1;
-    const int NUM_SHOOTING_NODES = 2;
-    const StepSizeType TIME_HOR = 0.0625_x;
+        ValidatedVectorMultivariateFunctionPatch PHI_GAMMA_ = integrateDynamics(f_xuc, product(x_sim_dom, udom, cdom), h);
+        ValidatedVectorMultivariateFunctionPatch PHI_GAMMA = make_function_patch({ xr,ur,tr }, PHI_GAMMA_, { x[0],x[1],u,0,t });
+        ValidatedVectorMultivariateFunctionPatch PHI = project_function(PHI_GAMMA, Range(0, x.size()));
+        ValidatedScalarMultivariateFunctionPatch GAMMA = PHI_GAMMA[x.size()+1];
+        ValidatedVectorMultivariateFunctionPatch PSI = make_function_patch({ xr,ur }, PHI, { x[0],x[1],u,h });
 
-    PRINT(NUM_SHOOTING_NODES);
-    problemFormulation problem_setup = problemFormulation(NUM_STATE, NUM_INPUT, NUM_SHOOTING_NODES, TIME_HOR);
-    problem_setup.setDynamics(f_xuc, i_doms);
-
-    problemOptimization problem_opt = problemOptimization(problem_setup);
-    problem_opt.optimize();
-
+        x_sim_dom = cast_exact_box(PSI.range());
+        c_sim_dom = cast_exact_interval(GAMMA.range());
+    }
     return 0;
 };
